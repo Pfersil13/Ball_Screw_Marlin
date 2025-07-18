@@ -6,22 +6,17 @@
 #include "hardware/clocks.h"
 #include "hardware/uart.h"
 
+#include "stepper.h"
+
+
+
 // Data will be copied from src to dst
 const char src[] = "Hello, world! (from DMA)";
 char dst[count_of(src)];
 
-#include "blink.pio.h"
 
-void blink_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint freq) {
-    blink_program_init(pio, sm, offset, pin);
-    pio_sm_set_enabled(pio, sm, true);
+STEPPER_DRV stepperMotor1;
 
-    printf("Blinking pin %d at %d Hz\n", pin, freq);
-
-    // PIO counter program takes 3 more cycles in total than we pass as
-    // input (wait for n + 1; mov; jmp)
-    pio->txf[sm] = (125000000 / (2 * freq)) - 3;
-}
 
 int64_t alarm_callback(alarm_id_t id, void *user_data) {
     // Put your timeout handler code in here
@@ -75,16 +70,7 @@ int main()
     // receive buffer (dst), so we can print it out from there.
     puts(dst);
 
-    // PIO Blinking example
-    PIO pio = pio0;
-    uint offset = pio_add_program(pio, &blink_program);
-    printf("Loaded program at %d\n", offset);
-    
-    #ifdef PICO_DEFAULT_LED_PIN
-    blink_pin_forever(pio, 0, offset, 0, 3);
-    #else
-    blink_pin_forever(pio, 0, offset, 6, 3);
-    #endif
+   
     // For more pio examples see https://github.com/raspberrypi/pico-examples/tree/master/pio
 
     // Timer example code - This example fires off the callback after 2000ms
@@ -108,10 +94,24 @@ int main()
     // Send out a string, with CR/LF conversions
     uart_puts(UART_ID, " Hello, UART!\n");
     
+    setupStruct(&stepperMotor1);
+    setupGPIO(&stepperMotor1);
+    setupPIO(&stepperMotor1);
     // For more examples of UART use see https://github.com/raspberrypi/pico-examples/tree/master/uart
-
+    float desired_freq = 1000.0f;
+    float cycles_per_step = 8.0f;
+    float new_div = clock_get_hz(clk_sys) / (desired_freq*cycles_per_step);
+    
+    pio_sm_set_clkdiv(pio0, stepperMotor1.stm_sm , new_div);
+    pio_sm_put(pio0, stepperMotor1.stm_sm , 200);
+    pio_sm_set_enabled(pio0, stepperMotor1.stm_sm, true);
+    
     while (true) {
         printf("Hello, world!\n");
+        printf("%f \n", new_div);
         sleep_ms(1000);
+        //if(pio_sm_is_tx_fifo_full(pio0, stepperMotor1.stm_sm) == 0)
+           // pio_sm_put(pio0, stepperMotor1.stm_sm , 200);
+
     }
 }
