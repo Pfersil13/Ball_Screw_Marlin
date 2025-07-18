@@ -15,7 +15,11 @@ const char src[] = "Hello, world! (from DMA)";
 char dst[count_of(src)];
 
 
+
 STEPPER_DRV stepperMotor1;
+STEPPER_DRV stepperMotor2;
+
+STEPPER_DRV stepperMotor3;
 
 
 int64_t alarm_callback(alarm_id_t id, void *user_data) {
@@ -92,26 +96,29 @@ int main()
     // In a default system, printf will also output via the default UART
     
     // Send out a string, with CR/LF conversions
+     sleep_ms(5000);
+
     uart_puts(UART_ID, " Hello, UART!\n");
     
-    setupStruct(&stepperMotor1);
-    setupGPIO(&stepperMotor1);
-    setupPIO(&stepperMotor1);
+    setupStepper(&stepperMotor1, 2,3,0);
+    setupStepper(&stepperMotor2, 2,3,1);
+    setupStepper(&stepperMotor3, 2,3,6);
+
     // For more examples of UART use see https://github.com/raspberrypi/pico-examples/tree/master/uart
-    float desired_freq = 1000.0f;
-    float cycles_per_step = 8.0f;
-    float new_div = clock_get_hz(clk_sys) / (desired_freq*cycles_per_step);
+
+    moveSteps(&stepperMotor1,5000);
+    moveSteps(&stepperMotor2,-6000);
+    moveSteps(&stepperMotor3,7000);
     
-    pio_sm_set_clkdiv(pio0, stepperMotor1.stm_sm , new_div);
-    pio_sm_put(pio0, stepperMotor1.stm_sm , 200);
-    pio_sm_set_enabled(pio0, stepperMotor1.stm_sm, true);
-    
+   
     while (true) {
-        printf("Hello, world!\n");
-        printf("%f \n", new_div);
-        sleep_ms(1000);
-        //if(pio_sm_is_tx_fifo_full(pio0, stepperMotor1.stm_sm) == 0)
-           // pio_sm_put(pio0, stepperMotor1.stm_sm , 200);
+        //printf("Hello, world!\n");
+        //printf("%f \n", new_div);
+        //sleep_ms(1000);
+        //if(pio_sm_is_tx_fifo_full(pio0, stepperMotor1.stm_sm) == 0){
+        //    sleep_ms(1000);
+        //   pio_sm_put(pio0, stepperMotor1.stm_sm , 200);
+        //}
 
     }
 }

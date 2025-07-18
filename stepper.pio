@@ -1,6 +1,7 @@
 .program stepper_precise
 .wrap_target
-    pull
+pull_again:
+    pull block 
     mov x, osr
 loop:
     jmp x--, do_step
@@ -10,7 +11,8 @@ do_step:
     set pins, 0   [1]
     jmp loop
 end:
-    wait 1 irq 0        
+    irq 0 rel           ; 4 + SM
+    jmp pull_again
 .wrap
 
 % c-sdk {
@@ -22,14 +24,21 @@ static inline void stepper_1_program_init(PIO pio, uint sm, uint offset, uint pi
 
     pio_sm_config c = stepper_precise_program_get_default_config(offset);
     sm_config_set_set_pins(&c, pin, 1);
-    sm_config_set_out_shift(&c, false, true, step ? 32 : 32);
+   sm_config_set_out_shift(&c, false, false, 32);  
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
 
-    float div = clock_get_hz(clk_sys) / (freq);
+    float div = clock_get_hz(clk_sys) / (freq*8);
     sm_config_set_clkdiv(&c, div);
 
     //pio_sm_put(pio,sm,200);
+    while (!pio_sm_is_tx_fifo_empty(pio, sm)) {
+    pio_sm_get(pio, sm);  // Lee y descarta datos si hubiera
+    }
+
+
+
     pio_sm_init(pio, sm, offset, &c);
+    pio_sm_exec(pio, sm, pio_encode_irq_set(true, 4 + sm));
     pio_sm_set_enabled(pio, sm, true);
 }
 
