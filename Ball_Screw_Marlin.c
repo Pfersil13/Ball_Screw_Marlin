@@ -100,17 +100,36 @@ int main()
 
     uart_puts(UART_ID, " Hello, UART!\n");
     
-    setupStepper(&stepperMotor1, 2,3,0);
+    setupStepper(&stepperMotor1, 15,3,14);
     setupStepper(&stepperMotor2, 2,3,1);
-    setupStepper(&stepperMotor3, 2,3,6);
+    setupStepper(&stepperMotor3, 7,3,6);
 
     // For more examples of UART use see https://github.com/raspberrypi/pico-examples/tree/master/uart
 
-    moveSteps(&stepperMotor1,5000);
-    moveSteps(&stepperMotor2,-6000);
-    moveSteps(&stepperMotor3,7000);
-    
-   
+    /*
+    enqueueMovement(&stepperMotor1, 1000, 10);
+    enqueueMovement(&stepperMotor1, 100, 100);
+    enqueueMovement(&stepperMotor1, 10, 1000);
+    enqueueMovement(&stepperMotor1, 2, 100);
+    enqueueMovement(&stepperMotor1, 10, 10);
+    enqueueMovement(&stepperMotor1, 100, 100);
+    enqueueMovement(&stepperMotor1, 10, 1000);
+    enqueueMovement(&stepperMotor1, 2, 100);
+    enqueueMovement(&stepperMotor1, 1000, 10);
+
+    */
+   //calculateAccelTrajectory(&stepperMotor1, 1000, 100);
+    //enqueueAccelTrajectory(&stepperMotor1, 1000, 100,10);
+    // Paso inicial fijo
+    //enqueueMovement(&stepperMotor2, 10, 50.0f);  // algo lento pero seguro
+// Paso inicial fijo
+    //enqueueMovement(&stepperMotor1, 10, 50.0f);  // algo lento pero seguro
+    //sleep_ms(1000);
+    generateTrapezoidalProfile(&stepperMotor1, 200*16*18, 0, 3000, 0, 250); //15000 Hz/s^2 Works fine
+    generateTrapezoidalProfile(&stepperMotor2, 200*16*18, 0, 3000, 0, 250);
+    //startNextMove(&stepperMotor1);
+    //startNextMove(&stepperMotor2);
+    //generateTrapezoidalProfile(&stepperMotor3, 200*16*4*10, 0, 1000*10, 0, 1000);
     while (true) {
         //printf("Hello, world!\n");
         //printf("%f \n", new_div);

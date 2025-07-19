@@ -7,8 +7,8 @@ loop:
     jmp x--, do_step
     jmp end
 do_step:
-    set pins, 1   [3]
-    set pins, 0   [1]
+    set pins, 1   [31] ;3
+    set pins, 0   [29]   ;1
     jmp loop
 end:
     irq 0 rel           ; 4 + SM
@@ -36,7 +36,7 @@ static inline void stepper_1_program_init(PIO pio, uint sm, uint offset, uint pi
     }
 
 
-
+    
     pio_sm_init(pio, sm, offset, &c);
     pio_sm_exec(pio, sm, pio_encode_irq_set(true, 4 + sm));
     pio_sm_set_enabled(pio, sm, true);
