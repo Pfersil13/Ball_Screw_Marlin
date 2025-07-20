@@ -15,6 +15,11 @@
         #define RIGHT 1
 
         #define BUFFER_SIZE 5000
+        typedef struct {
+            uint32_t steps;
+            uint32_t freq; 
+        } MovementCommand;
+
 
         typedef struct {
             int StepsToTake;
@@ -29,12 +34,14 @@
             int directionchangeDelayCounter;
             PIO stm_pio;
             int stm_sm;
-            int buffer[2][BUFFER_SIZE];
+            MovementCommand buffer[BUFFER_SIZE];
             int buffer_head;   // posición de lectura
             int buffer_tail;   // posición de escritura
             int buffer_length; // número de elementos válidos
             bool running;
             float actual_speed;
+            int dma_chan;
+            int current_transfer_count;  // Para contar pasos en DMA
         } STEPPER_DRV;
 
 
@@ -43,15 +50,19 @@
         void setupPIO(STEPPER_DRV * stepper);
         void pio0_irq0_handler();
 
+        
         void setFrec( STEPPER_DRV * stepper,float desired_freq);
         void moveSteps( STEPPER_DRV * stepper, int steps );
         void setDirection( STEPPER_DRV * stepper,int direction);
         void moveStepsAtSpeed(STEPPER_DRV * stepper, int steps, float frec);
         void enqueueMovement(STEPPER_DRV* stepper, int steps, int freq);
         void startNextMove(STEPPER_DRV* stepper);
-        void calculateAccelTrajectory(STEPPER_DRV *stepper, float target_freq, float accel);
-        void enqueueAccelTrajectory(STEPPER_DRV *stepper, float target_freq, float accel, int interval_ms);
-        void generateTrapezoidalProfile(STEPPER_DRV *stepper, int total_steps, float v_start, float v_max, float v_end, float accel);
 
-        
+        uint8_t generateAccelerationRamp(STEPPER_DRV *stepper, float t_accel, float v_start, float accel);
+        uint8_t generateSmoothAccelerationRamp(STEPPER_DRV *stepper, float t_accel, float v_start, float accel);
+
+        void generateTrapezoidalProfile(STEPPER_DRV *stepper, int total_steps, float v_start, float v_max, float v_end, float accel);
+        void generateSmoothSProfile(STEPPER_DRV *stepper, int total_steps, float v_start, float v_max, float v_end, float accel) ;
+        void generateMotionProfile(STEPPER_DRV *stepper, int total_steps, float v_start, float v_max, float v_end, float accel, bool use_s_curve);
+
 #endif

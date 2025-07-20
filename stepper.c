@@ -8,6 +8,9 @@
 
 #define CYCLES_PER_STEP 63.0         // Number of PIO clock cycles per step pulse
 
+#define INTERVAL_MS 10
+#define MIN_GROUP_STEPS 10
+#define MIN_FREQ 40.0f              // Frecuencia mínima de seguridad
 
 STEPPER_DRV *s1, *s2, *s3, *s4;     // Pointers to each stepper motor driver
 
@@ -15,6 +18,8 @@ uint8_t steper_number = 0;         // Counter to assign PIO state machines
 uint stm_offset;                   // Offset of the loaded PIO program
 
 bool flag = 0;                     // Used to ensure PIO program is only loaded once
+
+
 
 
 void setupStepper(STEPPER_DRV * stepper, uint8_t enable_pin, uint8_t dir_pin, uint8_t step_pin){
@@ -185,8 +190,8 @@ void enqueueMovement(STEPPER_DRV* stepper, int steps, int freq) {
 
     int i = stepper->buffer_tail;
 
-    stepper->buffer[0][i] = steps;
-    stepper->buffer[1][i] = freq;
+    stepper->buffer[i].steps = steps;
+    stepper->buffer[i].freq = freq;
 
     stepper->buffer_tail = (stepper->buffer_tail + 1) % BUFFER_SIZE;
     stepper->buffer_length++;
@@ -208,8 +213,8 @@ void startNextMove(STEPPER_DRV* stepper) {
 
     int i = stepper->buffer_head;
     printf("Queue number: %d\n", i);
-    int steps = stepper->buffer[0][i];
-    int freq  = stepper->buffer[1][i];
+    int steps = stepper->buffer[i].steps; 
+    int freq  = stepper->buffer[i].freq;
 
     moveStepsAtSpeed(stepper, steps, freq);
 
@@ -222,57 +227,119 @@ void startNextMove(STEPPER_DRV* stepper) {
 }
 
 
-void calculateAccelTrajectory(STEPPER_DRV *stepper, float target_freq, float accel) {
-    float current_speed = stepper->actual_speed;
 
-    // Compute time needed to accelerate from current_speed to target_freq
-    float tf = (target_freq - current_speed) / accel;  // seconds
-    printf("Total acceleration time (tf): %f s\n", tf);
+void generateSmoothSpeedRamp(STEPPER_DRV *stepper, float f_start, float f_end, float accel) {
+    float delta_f = f_end - f_start;
+    if (delta_f == 0.0f) return;
 
-    // Compute total steps during acceleration using kinematic equation:
-    // s = 0.5 * a * t^2 + v0 * t
-    float total_steps = 0.5f * accel * tf * tf + current_speed * tf;
-    printf("Estimated steps during acceleration: %f steps\n", total_steps);
+    float sign = (delta_f > 0) ? 1.0f : -1.0f;
+    float t_total = fabsf(delta_f) / accel;
 
-    // Simulate motion profile (one data point per millisecond for example)
-    for (int t_ms = 0; t_ms < (int)(tf * 1000); t_ms++) {
-        float t = t_ms / 1000.0f;  // convert ms to seconds
+    float accumulated_steps = 0.0f;
+    float accumulated_time_ms = 0.0f;
 
-        // Compute instantaneous speed and position at time t
-        float speed = accel * t + current_speed;  // in Hz
-        float position = 0.5f * accel * t * t + current_speed * t;  // in steps
+    for (int t_ms = 0; t_ms < (int)(t_total * 1000); t_ms += INTERVAL_MS) {
+        float t = t_ms / 1000.0f;
 
-        printf("Time: %d ms, Position: %f steps, Speed: %f Hz\n", t_ms, position, speed);
-    }
-}
+        // Lineal:
+        // float freq = f_start + sign * accel * t;
 
-void enqueueAccelTrajectory(STEPPER_DRV *stepper, float target_freq, float accel, int interval_ms) {
-    float current_speed = stepper->actual_speed;
-    float tf = (target_freq - current_speed) / accel;
-    int intervals = (int)(tf * 1000.0f / interval_ms); // number of chunks
-    float t = 0.0f;
-    float last_position = 0.0f;
+        // S-curve:
+        float s_curve = 0.5f - 0.5f * cosf(M_PI * t / t_total);
+        float freq = f_start + (f_end - f_start) * s_curve;
 
-    for (int i = 0; i <= intervals; i++) {
-        t = i * (interval_ms / 1000.0f);  // time in seconds
+        float delta_steps = freq * (INTERVAL_MS / 1000.0f);
+        accumulated_steps += delta_steps;
+        accumulated_time_ms += INTERVAL_MS;
 
-        float position = 0.5f * accel * t * t + current_speed * t;
-        float delta_steps = position - last_position;
-        last_position = position;
+        if (accumulated_steps >= MIN_GROUP_STEPS) {
+            int steps_to_send = (int)accumulated_steps;
+            float avg_freq = accumulated_steps / (accumulated_time_ms / 1000.0f);
+            if (avg_freq < MIN_FREQ) avg_freq = MIN_FREQ;
 
-        float speed = accel * t + current_speed;
-
-        int steps = (int)(delta_steps + 0.5f); // round to nearest int
-        if (steps != 0) {
-            //enqueueMovement(stepper, steps, speed);
-            printf("index: %d , Position: %d steps, Speed: %f \n", i, steps, 1000.0);
+            enqueueMovement(stepper, steps_to_send, avg_freq);
+            accumulated_steps -= steps_to_send;
+            accumulated_time_ms = 0;
         }
     }
 
-    // Update the current speed at the end of trajectory
-    stepper->actual_speed = target_freq;
+    // Actualizamos velocidad actual del stepper
+    stepper->actual_speed = f_end;
 }
 
+
+uint8_t generateAccelerationRamp(STEPPER_DRV *stepper, float t_accel, float v_start, float accel) {
+    float accumulated_steps = 0.0f;
+    float accumulated_time_ms = 0.0f;
+
+    for (int i = 0; i < (int)(t_accel * 1000); i += INTERVAL_MS) {
+        float t = i / 1000.0f; // tiempo en segundos
+
+        // Frecuencia en este instante
+        float freq = v_start + accel * t;
+        if (freq < MIN_FREQ) freq = MIN_FREQ;
+
+        // Calcula los pasos que corresponden a este intervalo
+        float delta_steps = freq * (INTERVAL_MS / 1000.0f);
+        accumulated_steps += delta_steps;
+        accumulated_time_ms += INTERVAL_MS;
+
+        // Cuando tenemos un grupo mínimo de pasos, enviamos el movimiento
+        if (accumulated_steps >= MIN_GROUP_STEPS) {
+            int steps_to_send = (int)accumulated_steps;
+            float avg_freq = accumulated_steps / (accumulated_time_ms / 1000.0f);
+            if (avg_freq < MIN_FREQ) avg_freq = MIN_FREQ;
+
+            enqueueMovement(stepper, steps_to_send, avg_freq);
+
+            // Restamos los pasos enviados y reiniciamos el contador de tiempo acumulado
+            accumulated_steps -= steps_to_send;
+            accumulated_time_ms = 0;
+        }
+    }
+
+    // Por si quedan pasos residuales tras el bucle
+    return accumulated_steps;
+}
+
+
+uint8_t generateSmoothAccelerationRamp(STEPPER_DRV *stepper, float t_accel, float v_start, float accel) {
+
+    float accumulated_steps = 0.0f;
+    float accumulated_time_ms = 0.0f;
+    float v_max = v_start + accel * t_accel;
+
+    for (int i = 0; i < (int)(t_accel * 1000); i += INTERVAL_MS) {
+        float t = i / (t_accel * 1000.0f); // [0,1]
+        float s_curve = 0.5f - 0.5f * cosf(M_PI * t); // Ease-in S-curve
+
+        float freq = v_start + (v_max - v_start) * s_curve;
+        // Frecuencia en este instante
+    
+        if (freq < MIN_FREQ) freq = MIN_FREQ;
+
+        // Calcula los pasos que corresponden a este intervalo
+        float delta_steps = freq * (INTERVAL_MS / 1000.0f);
+        accumulated_steps += delta_steps;
+        accumulated_time_ms += INTERVAL_MS;
+
+        // Cuando tenemos un grupo mínimo de pasos, enviamos el movimiento
+        if (accumulated_steps >= MIN_GROUP_STEPS) {
+            int steps_to_send = (int)accumulated_steps;
+            float avg_freq = accumulated_steps / (accumulated_time_ms / 1000.0f);
+            if (avg_freq < MIN_FREQ) avg_freq = MIN_FREQ;
+
+            enqueueMovement(stepper, steps_to_send, avg_freq);
+
+            // Restamos los pasos enviados y reiniciamos el contador de tiempo acumulado
+            accumulated_steps -= steps_to_send;
+            accumulated_time_ms = 0;
+        }
+    }
+
+    // Por si quedan pasos residuales tras el bucle
+    return accumulated_steps;
+}
 
 // Generates a trapezoidal velocity profile for a stepper motor movement
 // total_steps: total number of steps to move
@@ -280,11 +347,6 @@ void enqueueAccelTrajectory(STEPPER_DRV *stepper, float target_freq, float accel
 // v_max: maximum velocity in steps/s
 // v_end: final velocity in steps/s
 // accel: acceleration (and deceleration) in steps/s^2
-#define INITIAL_SINGLE_STEPS 10     // Enviar los 3 primeros pasos individualmente
-#define INTERVAL_MS 1
-#define MIN_GROUP_STEPS 10
-#define MIN_FREQ 40.0f              // Frecuencia mínima de seguridad
-#define MAX_WAIT_FIRST_SEND_MS 30  // Si pasa demasiado tiempo, forzar envío
 
 float accumulated_steps = 0.0f;
 int step_counter = 0;
@@ -313,52 +375,85 @@ void generateTrapezoidalProfile(STEPPER_DRV *stepper, int total_steps, float v_s
 
         // --- Handle triangular profile case (not implemented yet) ---
         if (steps_const < 0) {
-            printf("Triangular profile required but not implemented.\n");
-            return;
+                // --- PERFIL TRIANGULAR ---
+            float v_peak_sq = accel * total_steps + 0.5f * (v_start * v_start + v_end * v_end);
+            float v_peak = sqrtf(v_peak_sq);
+
+            t_accel = (v_peak - v_start) / accel;
+            steps_accel = 0.5f * (v_start + v_peak) * t_accel;
+
+            t_decel = (v_peak - v_end) / accel;
+            steps_decel = 0.5f * (v_peak + v_end) * t_decel;
+
+            t_const = 0;
+            v_max = v_peak;
+            
         }
 
         // --- ACCELERATION PHASE ---
-    float accumulated_steps = 0.0f;
-    float accumulated_time_ms = 0.0f;
-
-    for (int i = 0; i < t_accel * 1000; i += INTERVAL_MS) {
-        float t = i / 1000.0f;
-        float freq = v_start + accel * t;
-        if (freq < MIN_FREQ) freq = MIN_FREQ;
-
-        float delta_steps = freq * (INTERVAL_MS / 1000.0f);
-        accumulated_steps += delta_steps;
-        accumulated_time_ms += INTERVAL_MS;
-
-        if (accumulated_steps >= MIN_GROUP_STEPS) {
-            int steps_to_send = (int)accumulated_steps;
-            float avg_freq = accumulated_steps / (accumulated_time_ms / 1000.0f);
-            if (avg_freq < MIN_FREQ) avg_freq = MIN_FREQ;
-            enqueueMovement(stepper, steps_to_send, avg_freq);
-            accumulated_steps -= steps_to_send;
-            accumulated_time_ms = 0;
-        }
-    }
-
+        generateAccelerationRamp(stepper,t_accel,v_start,accel);
         // --- CONSTANT SPEED PHASE ---
         if (steps_const >= 1.0f) {
             int steps_to_send = (int)steps_const;
             enqueueMovement(stepper, steps_to_send, v_max);
         }
+         // --- DECELERATION PHASE ---
+        generateAccelerationRamp(stepper,t_decel,v_max,-accel);
+}
 
-        // --- DECELERATION PHASE ---
-        accumulated_steps = 0.0f;
-        for (int i = 0; i < t_decel * 1000; i += INTERVAL_MS) {
-            float t = i / 1000.0f;
-            float freq = v_max - accel * t;
 
-            float delta_steps = freq * (INTERVAL_MS / 1000.0f);;
-            accumulated_steps += delta_steps;
+void  generateSmoothSProfile(STEPPER_DRV *stepper, int total_steps, float v_start, float v_max, float v_end, float accel) {
+    // Calcula tiempos de aceleración/desaceleración con aceleración media
+    float t_accel = (v_max - v_start) / accel;
+    float t_decel = (v_max - v_end) / accel;
+
+    // Estimación de pasos durante aceleración y desaceleración usando promedio
+    float steps_accel = (v_start + v_max) / 2 * t_accel;
+    float steps_decel = (v_max + v_end) / 2 * t_decel;
+
+    float steps_const  = total_steps - steps_accel - steps_decel;          // Resto de pasos a velocidad constante
+    float t_const = 0.0f;
+    if (steps_const > 0.0f) {
+        t_const = steps_const / v_max;
+    }
+    if (steps_const < 0) {
+        // --- PERFIL TRIANGULAR ---
+        float v_peak_sq = accel * total_steps + 0.5f * (v_start * v_start + v_end * v_end);
+        float v_peak = sqrtf(v_peak_sq);
+
+        t_accel = (v_peak - v_start) / accel;
+        steps_accel = 0.5f * (v_start + v_peak) * t_accel;
+
+        t_decel = (v_peak - v_end) / accel;
+        steps_decel = 0.5f * (v_peak + v_end) * t_decel;
+
+        t_const = 0;
+        v_max = v_peak;
+    }
+
+    float accumulated_steps = 0.0f;
+    float accumulated_time_ms = 0.0f;
+
+    // --- ACCELERACIÓN SUAVIZADA ---
+    int steps = generateSmoothAccelerationRamp(stepper,t_accel,v_start,accel);
+
+    // --- VELOCIDAD CONSTANTE ---
+    if (steps_const >= 1.0f) {
+        int steps_to_send = (int)steps_const;
+        enqueueMovement(stepper, steps_to_send, v_max);
+    }
+
+    // --- DECELERACIÓN SUAVIZADA ---
+    steps =+ generateSmoothAccelerationRamp(stepper,t_decel,v_max,-accel);
+    printf("Pasos perdios: %d\n", steps);
+}
+
+
+void generateMotionProfile(STEPPER_DRV *stepper, int total_steps, float v_start, float v_max, float v_end, float accel, bool use_s_curve) {
     
-            if (accumulated_steps >= MIN_GROUP_STEPS) {
-                int steps_to_send = (int)accumulated_steps;
-                enqueueMovement(stepper, steps_to_send, freq);
-                accumulated_steps -= steps_to_send;
-            }
-        }
+        if (use_s_curve) {
+            generateSmoothSProfile(stepper,total_steps,v_start,v_max, v_end,accel);
+        } else {
+            generateTrapezoidalProfile(stepper,total_steps,v_start,v_max, v_end,accel);
+        }  
 }
