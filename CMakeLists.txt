@@ -28,41 +28,41 @@ set(PICO_BOARD pico CACHE STRING "Board type")
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(Ball_Screw_Marlin C CXX ASM)
+project(RP2040_PIO_AccelStepper C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(Ball_Screw_Marlin Ball_Screw_Marlin.c  stepper.c)
+add_executable(main main.c  stepper.c)
 
-pico_set_program_name(Ball_Screw_Marlin "Ball_Screw_Marlin")
-pico_set_program_version(Ball_Screw_Marlin "0.1")
+pico_set_program_name(main "main")
+pico_set_program_version(main "0.1")
 
 # Generate PIO header
-pico_generate_pio_header(Ball_Screw_Marlin ${CMAKE_CURRENT_LIST_DIR}/stepper.pio)
+pico_generate_pio_header(main ${CMAKE_CURRENT_LIST_DIR}/stepper.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(Ball_Screw_Marlin 0)
-pico_enable_stdio_usb(Ball_Screw_Marlin 1)
+pico_enable_stdio_uart(main 0)
+pico_enable_stdio_usb(main 1)
 
 # Add the standard library to the build
-target_link_libraries(Ball_Screw_Marlin
+target_link_libraries(main
         pico_stdlib)
 
 # Add the standard include files to the build
-target_include_directories(Ball_Screw_Marlin PRIVATE
+target_include_directories(main PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
 # Add any user requested libraries
-target_link_libraries(Ball_Screw_Marlin 
+target_link_libraries(main 
         hardware_dma
         hardware_pio
         hardware_timer
         hardware_clocks
         )
 
-pico_add_extra_outputs(Ball_Screw_Marlin)
+pico_add_extra_outputs(main)
 
